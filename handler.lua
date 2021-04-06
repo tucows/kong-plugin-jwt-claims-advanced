@@ -177,7 +177,12 @@ function JWTClaimsHeaderExtHandler:access(config)
         return unauthorized_due_to_failed_claim(claim_config.path, "did not equal "..claim_config.equals)
       end
     end
-    if claim_config.equals_one_of ~= nil then
+    if claim_config.does_not_equal ~= nil then
+      if tostring(payload_claim_item) == tostring(claim_config.does_not_equal) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal)
+      end
+    end
+    if #claim_config.equals_one_of ~= 0 then
       local match = false
       local check_count = 0
       for ei, ev in ipairs(claim_config.equals_one_of) do
@@ -190,6 +195,19 @@ function JWTClaimsHeaderExtHandler:access(config)
         return unauthorized_due_to_failed_claim(claim_config.path, "did not equal one of "..table.concat(claim_config.equals_one_of, "; "))
       end
     end
+    if #claim_config.equals_none_of ~= 0 then
+      local match = false
+      local check_count = 0
+      for ei, ev in ipairs(claim_config.equals_none_of) do
+        if tostring(payload_claim_item) == tostring(ev) then
+          match = true
+        end
+        check_count = check_count + 1
+      end
+      if match and check_count > 0 then
+        return unauthorized_due_to_failed_claim(claim_config.path, "was equal to one of "..table.concat(claim_config.equals_none_of, "; "))
+      end
+    end
     if claim_config.contains ~= nil then
       if type(payload_claim_item) ~= "table" then
         return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
@@ -197,17 +215,45 @@ function JWTClaimsHeaderExtHandler:access(config)
         return unauthorized_due_to_failed_claim(claim_config.path, "does not contain "..claim_config.contains)
       end
     end
-    if claim_config.contains_one_of ~= nil then
-      local match = false
-      local check_count = 0
-      for ci, cv in ipairs(claim_config.contains_one_of) do
-        if table_contains_value(payload_claim_item,cv) then
-          match = true
-        end
-        check_count = check_count + 1
+    if claim_config.does_not_contain ~= nil then
+      if type(payload_claim_item) ~= "table" then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      elseif table_contains_value(payload_claim_item,claim_config.does_not_contain) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "contains "..claim_config.does_not_contain)
       end
-      if not match and check_count > 0 then
-        return unauthorized_due_to_failed_claim(claim_config.path, "does not contain one of "..table.concat(claim_config.contains_one_of, "; "))
+    end
+    if #claim_config.contains_one_of ~= 0 then
+      if type(payload_claim_item) ~= "table" then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      else
+        local match = false
+        local check_count = 0
+        for ci, cv in ipairs(claim_config.contains_one_of) do
+          if table_contains_value(payload_claim_item,cv) then
+            match = true
+          end
+          check_count = check_count + 1
+        end
+        if not match and check_count > 0 then
+          return unauthorized_due_to_failed_claim(claim_config.path, "does not contain one of "..table.concat(claim_config.contains_one_of, "; "))
+        end
+      end
+    end
+    if #claim_config.contains_none_of ~= 0 then
+      if type(payload_claim_item) ~= "table" then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      else
+        local match = false
+        local check_count = 0
+        for ci, cv in ipairs(claim_config.contains_none_of) do
+          if table_contains_value(payload_claim_item,cv) then
+            match = true
+          end
+          check_count = check_count + 1
+        end
+        if match and check_count > 0 then
+          return unauthorized_due_to_failed_claim(claim_config.path, "contains one of "..table.concat(claim_config.contains_none_of, "; "))
+        end
       end
     end
 

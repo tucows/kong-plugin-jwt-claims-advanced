@@ -1,5 +1,5 @@
 package = "kong-plugin-jwt-claims-advanced"
-version = "0.1-2"
+version = "0.1-3"
 description = {
   summary = "A Kong plugin to allow custom JWT claims/values checking, validation, and forwarding as custo HTTP headers.",
   license = "Apache 2.0",
@@ -8,8 +8,8 @@ dependencies = {
   "lua ~> 5.1"
 }
 source = {
-  url = "git+https://github.com/tucows/kong-plugin-jwt-claims-advanced.git",
-  tag = "v0.1-2"
+  url = "file://./handler.lua",
+  tag = "v0.1-3"
 }
 build = {
   type = "builtin",

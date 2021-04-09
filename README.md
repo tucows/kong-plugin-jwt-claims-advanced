@@ -120,17 +120,33 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
 
 Checks the string/number value at the location specified by path to make sure it equals the value given in this configuration.  If it does not, then processing stops, and a 403/unauthorized is returned out.
 
+### does_not_equal
+
+Checks the string/number value at the location specified by path to make sure it does not equal the value given in this configuration.  If it does, then processing stops, and a 403/unauthorized is returned out.
+
 ### equals_one_of
 
 Checks the string/number value at the location specified by path to make sure it equals one of the given values in this configuration.  If it does not, then processing stops, and a 403/unauthorized is returned out.
+
+### equals_none_of
+
+Checks the string/number value at the location specified by path to make sure it does not equal any of the given values in this configuration.  If it does, then processing stops, and a 403/unauthorized is returned out.
 
 ### contains
 
 Checks the array at the given location specified by path to make sure that it has an element that is equal to the given value in this configuration.  If it does not, then processing stops, and a 403/unauthorized is returned out.
 
+### does_not_contain
+
+Checks the array at the given location specified by path to make sure that it has no element that is equal to the given value in this configuration.  If it does, then processing stops, and a 403/unauthorized is returned out.
+
 ### contains_one_of
 
 Checks the array at the given location specified by path to make sure that it has an element that is equal to one of the given values in this configuration.  If it does not, then processing stops, and a 403/unauthorized is returned out.
+
+### contains_none_of
+
+Checks the array at the given location specified by path to make sure that it has no element that is equal to any of the given values in this configuration.  If it does, then processing stops, and a 403/unauthorized is returned out.
 
 ## Notes
 

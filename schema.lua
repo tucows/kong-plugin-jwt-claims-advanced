@@ -67,9 +67,25 @@ return {
                       type = "string",
                     },
                   },
+                  -- This claim (array/table) must NOT contain the value specified with the "does_not_contain" param
+                  {
+                    does_not_contain = {
+                      type = "string",
+                    },
+                  },
                   -- This claim (array/table) must contain at least ONE of the values specified with the "contains_one_of" param
                   {
                     contains_one_of = {
+                      type = "array",
+                      elements = {
+                        type = "string",
+                      },
+                      default = {},
+                    },
+                  },
+                  -- This claim (array/table) must NOT contain ANY of the values specified with the "contains_none_of" param
+                  {
+                    contains_none_of = {
                       type = "array",
                       elements = {
                         type = "string",
@@ -83,6 +99,12 @@ return {
                       type = "string",
                     },
                   },
+                  -- This claim must NOT match the value specified with the "does_not_equal" param
+                  {
+                    does_not_equal = {
+                      type = "string",
+                    },
+                  },
                   -- This claim must match at least ONE of the values specified with the "equals_one_of" param
                   {
                     equals_one_of = {
@@ -93,10 +115,25 @@ return {
                       default = {},
                     },
                   },
+                  -- This claim must NOT match ANY of the values specified with the "equals_none_of" param
+                  {
+                    equals_none_of = {
+                      type = "array",
+                      elements = {
+                        type = "string",
+                      },
+                      default = {},
+                    },
+                  },
+
+
+
+
+
                 },
                 entity_checks = {
                   {
-                    at_least_one_of = { "output_header", "contains", "contains_one_of", "equals", "equals_one_of" },
+                    at_least_one_of = { "output_header", "contains", "does_not_contain", "contains_one_of", "contains_none_of", "equals", "does_not_equal", "equals_one_of", "equals_none_of" },
                   },
                 },
               },

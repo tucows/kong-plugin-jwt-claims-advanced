@@ -147,7 +147,10 @@ local function unauthorized_due_to_failed_claim(claim_name, failure_reason)
     failure_reason = "(unspecified)"
   end
   kong.log.err("Failed claim: "..claim_name..";  reason: "..failure_reason)
-  return kong.response.exit(403, "Unauthorized")
+  return kong.response.exit(403, {
+    message = "Unauthorized",
+    claim_path = claim_name,
+  })
 end
 
 

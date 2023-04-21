@@ -151,4 +151,3 @@ Checks the array at the given location specified by path to make sure that it ha
 ## Notes
 
 - To build the rock file: `luarocks build --local --pack-binary-rock kong-plugin-jwt-claims-advanced-*.rockspec`
-

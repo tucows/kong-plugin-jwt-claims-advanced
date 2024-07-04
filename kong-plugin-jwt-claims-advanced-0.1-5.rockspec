@@ -5,7 +5,7 @@ description = {
   license = "Apache 2.0",
 }
 dependencies = {
-  "lua ~> 5.4"
+  "lua ~> 5.1"
 }
 source = {
   url = "git+https://github.com/tucows/kong-plugin-jwt-claims-advanced.git",

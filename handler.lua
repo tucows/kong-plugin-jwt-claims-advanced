@@ -1,19 +1,16 @@
-local BasePlugin = require "kong.plugins.base_plugin"
 local constants = require "kong.constants"
 local jwt_decoder = require "kong.plugins.jwt.jwt_parser"
 local re_gmatch = ngx.re.gmatch
 local json = require "cjson"
 local kong = kong
 
-local JWTClaimsHeaderExtHandler = BasePlugin:extend()
-
-JWTClaimsHeaderExtHandler.VERSION  = "1.0.0"
-
 -- Note: The jwt plugin's priority is 1005, so making our priority lower ensures
 -- that the JWT plugin handles checking validity of the JWT token before we work
 -- with the parsed payload.
-JWTClaimsHeaderExtHandler.PRIORITY = 999
-
+local JWTClaimsHeaderExtHandler = {
+  VERSION  = "1.1.0",
+  PRIORITY = 999,
+}
 
 ---- A modified version of the one found in kong.plugin.jwt because
 ---- we cannot access the original retrieve_token() declared as local

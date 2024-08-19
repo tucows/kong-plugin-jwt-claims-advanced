@@ -12,7 +12,7 @@ This plugin was created to satisfy those needs.
 
 ## Compatibility
 
-This plugin is compatible with Kong 2.3.x.
+This plugin is compatible with Kong 3.7.1
 
 ## Installation
 

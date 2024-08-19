@@ -8,7 +8,7 @@ dependencies = {
   "lua >= 5.1"
 }
 source = {
-  url = "git+https://github.com/danny6869/kong-plugin-jwt-claims-advanced.git",
+  url = "git+https://github.com/tucows/kong-plugin-jwt-claims-advanced.git",
   tag = "v0.2-1"
 }
 build = {

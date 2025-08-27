@@ -1,18 +1,15 @@
-local BasePlugin = require "kong.plugins.base_plugin"
-local constants = require "kong.constants"
 local jwt_decoder = require "kong.plugins.jwt.jwt_parser"
 local re_gmatch = ngx.re.gmatch
 local json = require "cjson"
 local kong = kong
 
-local JWTClaimsHeaderExtHandler = BasePlugin:extend()
-
-JWTClaimsHeaderExtHandler.VERSION  = "1.0.0"
-
--- Note: The jwt plugin's priority is 1005, so making our priority lower ensures
--- that the JWT plugin handles checking validity of the JWT token before we work
--- with the parsed payload.
-JWTClaimsHeaderExtHandler.PRIORITY = 999
+local plugin = {
+  VERSION = "1.0.1",
+  -- Note: The jwt plugin's priority is 1005, so making our priority lower ensures
+  -- that the JWT plugin handles checking validity of the JWT token before we work
+  -- with the parsed payload.
+  PRIORITY = 999,
+}
 
 
 ---- A modified version of the one found in kong.plugin.jwt because
@@ -154,13 +151,7 @@ local function unauthorized_due_to_failed_claim(claim_name, failure_reason)
 end
 
 
-function JWTClaimsHeaderExtHandler:new()
-  JWTClaimsHeaderExtHandler.super.new(self, "jwt-claims-advanced")
-end
-
-
-function JWTClaimsHeaderExtHandler:access(config)
-  JWTClaimsHeaderExtHandler.super.access(self)
+function plugin:access(config)
 
   -- Find the JWT using the same types of configurations the
   -- main JWT plugin uses, and return the decoded JWT object...
@@ -266,12 +257,13 @@ function JWTClaimsHeaderExtHandler:access(config)
       if type(payload_claim_item) == "table" then
         payload_claim_item_as_text = json.encode(payload_claim_item)
       end
-      ngx.req.set_header(claim_config.output_header, payload_claim_item_as_text)
+      -- Set header on upstream request
+      kong.service.request.set_header(claim_config.output_header, payload_claim_item_as_text)
     end
 
   end
 
 end
 
-return JWTClaimsHeaderExtHandler
+return plugin
 

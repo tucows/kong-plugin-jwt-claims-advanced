@@ -253,6 +253,9 @@ function plugin:access(config)
 
     -- Output in headers...
     if claim_config.output_header ~= nil then
+      if payload_claim_item == nil then
+        kong.service.request.set_header(claim_config.output_header, "none")
+      end
       local payload_claim_item_as_text = payload_claim_item
       if type(payload_claim_item) == "table" then
         payload_claim_item_as_text = json.encode(payload_claim_item)

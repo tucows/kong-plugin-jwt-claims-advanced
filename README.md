@@ -29,6 +29,7 @@ Consider the following JWT data from a decoded token...
 ``` jsonc
 {
   // Payload data format can be totally arbitrary to your needs.  This example is meant to demonstrate the capabilities of the jwt-claims-advanced plugin
+  "jti": "some-unique-id",
   "requestor": {
     "id": "you-are-number-6",
     "groups": [
@@ -83,6 +84,10 @@ plugins:
     - path: requestor.groups
       contains: developer-grp
       output_header: X-JWT-Requestor-Groups
+      allow_if_undefined: true
+    - path: unexisted_claim
+      output_header: X-JWT-Unexisted-Claim
+      allow_if_undefined: true
 
 ```
 
@@ -113,8 +118,13 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
   X-JWT-Requestor: { "id": "you-are-number-6", "groups": [ "admin-grp", "sales-grp", "developer-grp", "customer-grp" ], "meta": { "what": "eva" } }
   X-JWT-Requestor-Groups: [ "admin-grp", "sales-grp", "developer-grp", "customer-grp" ]
   X-JWT-Expires-At: 100353266160
+  X-JWT-Unexisted-Claim: ""
 
 ```
+
+### allow_if_undefined (optional)
+
+Values can be either true or false (false is the default). When this option is enabled it will set the value of HTTP header for this claim to an empty string if the claim doesn't exist or is holding a value of undefined or null. If not, then the claim is required and should be part of the payload
 
 ### equals
 

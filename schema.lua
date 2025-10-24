@@ -61,6 +61,14 @@ return {
                       type = "string",
                     },
                   },
+
+                  {
+                    -- Example: true / false
+                    allow_if_undefined = {
+                      type = "boolean",
+                      default = false
+                    },
+                  },
                   -- This claim (array/table) must contain the value specified with the "contains" param
                   {
                     contains = {
@@ -133,7 +141,7 @@ return {
                 },
                 entity_checks = {
                   {
-                    at_least_one_of = { "output_header", "contains", "does_not_contain", "contains_one_of", "contains_none_of", "equals", "does_not_equal", "equals_one_of", "equals_none_of" },
+                    at_least_one_of = { "output_header", "allow_if_undefined", "contains", "does_not_contain", "contains_one_of", "contains_none_of", "equals", "does_not_equal", "equals_one_of", "equals_none_of" },
                   },
                 },
               },

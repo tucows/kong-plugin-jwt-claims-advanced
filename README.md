@@ -118,7 +118,7 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
   X-JWT-Requestor: { "id": "you-are-number-6", "groups": [ "admin-grp", "sales-grp", "developer-grp", "customer-grp" ], "meta": { "what": "eva" } }
   X-JWT-Requestor-Groups: [ "admin-grp", "sales-grp", "developer-grp", "customer-grp" ]
   X-JWT-Expires-At: 100353266160
-  X-JWT-Unexisted-Claim: ""
+  X-JWT-Nonexistant-Claim: ""
 
 ```
 

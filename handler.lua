@@ -253,7 +253,7 @@ function plugin:access(config)
 
     -- Output in headers...
     if claim_config.output_header ~= nil then
-      if payload_claim_item == nil and claim_config.allow_if_undefined then
+      if payload_claim_item == nil and claim_config.allow_undefined then
         kong.service.request.set_header(claim_config.output_header, "")
         return
       end

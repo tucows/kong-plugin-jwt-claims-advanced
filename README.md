@@ -84,10 +84,10 @@ plugins:
     - path: requestor.groups
       contains: developer-grp
       output_header: X-JWT-Requestor-Groups
-      allow_if_undefined: true
+      allow_undefined: false
     - path: unexisted_claim
       output_header: X-JWT-Unexisted-Claim
-      allow_if_undefined: true
+      allow_undefined: true
 
 ```
 
@@ -122,7 +122,7 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
 
 ```
 
-### allow_if_undefined (optional)
+### allow_undefined (optional)
 
 Values can be either true or false (false is the default). When this option is enabled it will set the value of HTTP header for this claim to an empty string if the claim doesn't exist or is holding a value of undefined or null. If not, then the claim is required and should be part of the payload
 

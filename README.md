@@ -85,8 +85,8 @@ plugins:
       contains: developer-grp
       output_header: X-JWT-Requestor-Groups
       allow_undefined: false
-    - path: unexisted_claim
-      output_header: X-JWT-Unexisted-Claim
+    - path: nonexistant_claim
+      output_header: X-JWT-Nonexistant-Claim
       allow_undefined: true
 
 ```

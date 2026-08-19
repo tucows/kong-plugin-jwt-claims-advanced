@@ -131,12 +131,31 @@ end
 local function table_contains_value (t, value)
 
   for idx, val in ipairs(t) do
-    if val == value then
+    if type(val) ~= "table" and tostring(val) == tostring(value) then
       return true
     end
   end
 
   return false
+end
+
+-- A JSON array decodes to a Lua table whose keys are exactly 1..#t.
+-- A JSON object (e.g. {"0": "x"}) does not satisfy this, even though
+-- both are Lua tables -- the contains-family operators only make sense
+-- against the former.
+local function is_json_array (t)
+
+  local pairs_count = 0
+  for _ in pairs(t) do
+    pairs_count = pairs_count + 1
+  end
+
+  local ipairs_count = 0
+  for _ in ipairs(t) do
+    ipairs_count = ipairs_count + 1
+  end
+
+  return pairs_count == ipairs_count
 end
 
 local function unauthorized_due_to_failed_claim(claim_name, failure_reason)
@@ -172,8 +191,8 @@ function plugin:access(config)
       end
     end
     if claim_config.does_not_equal ~= nil then
-      if tostring(payload_claim_item) == tostring(claim_config.does_not_equal) then
-        return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal)
+      if type(payload_claim_item) == "table" or tostring(payload_claim_item) == tostring(claim_config.does_not_equal) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal.." or was an unexpected table/array shape")
       end
     end
     if #claim_config.equals_one_of ~= 0 then
@@ -192,6 +211,9 @@ function plugin:access(config)
     if #claim_config.equals_none_of ~= 0 then
       local match = false
       local check_count = 0
+      if type(payload_claim_item) == "table" then
+        match = true
+      end
       for ei, ev in ipairs(claim_config.equals_none_of) do
         if tostring(payload_claim_item) == tostring(ev) then
           match = true
@@ -203,22 +225,22 @@ function plugin:access(config)
       end
     end
     if claim_config.contains ~= nil then
-      if type(payload_claim_item) ~= "table" then
-        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
       elseif not table_contains_value(payload_claim_item,claim_config.contains) then
         return unauthorized_due_to_failed_claim(claim_config.path, "does not contain "..claim_config.contains)
       end
     end
     if claim_config.does_not_contain ~= nil then
-      if type(payload_claim_item) ~= "table" then
-        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
       elseif table_contains_value(payload_claim_item,claim_config.does_not_contain) then
         return unauthorized_due_to_failed_claim(claim_config.path, "contains "..claim_config.does_not_contain)
       end
     end
     if #claim_config.contains_one_of ~= 0 then
-      if type(payload_claim_item) ~= "table" then
-        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
       else
         local match = false
         local check_count = 0
@@ -234,8 +256,8 @@ function plugin:access(config)
       end
     end
     if #claim_config.contains_none_of ~= 0 then
-      if type(payload_claim_item) ~= "table" then
-        return unauthorized_due_to_failed_claim(claim_config.path, "not a table")
+      if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
       else
         local match = false
         local check_count = 0

@@ -292,6 +292,80 @@ describe("jwt-claims-advanced handler", function()
 
     end)
 
+    describe("deny-list bypass via claim type/shape (security review finding)", function()
+
+      -- A deny-list rule (does_not_equal/equals_none_of/does_not_contain/
+      -- contains_none_of) must fail closed when the claim's JSON shape
+      -- doesn't match what the rule expects, rather than silently
+      -- passing because tostring()/== can't see through the mismatch.
+      -- The claim holder controls this shape directly: in Kong's
+      -- default HS256 credential model a consumer signs their own
+      -- token, so they can wrap a forbidden scalar in an array/object,
+      -- or use a number where a string was configured, without any key
+      -- compromise.
+
+      it("does_not_equal rejects a forbidden value wrapped in an array instead of a scalar", function()
+        set_jwt_claims({ role = { "admin" } })
+
+        plugin:access(make_config({
+          make_claim({ path = "role", does_not_equal = "admin", output_header = "X-JWT-Role" }),
+        }))
+
+        assert_rejected("role")
+      end)
+
+      it("equals_none_of rejects a forbidden value wrapped in an array instead of a scalar", function()
+        set_jwt_claims({ role = { "admin" } })
+
+        plugin:access(make_config({
+          make_claim({ path = "role", equals_none_of = { "admin", "superadmin" } }),
+        }))
+
+        assert_rejected("role")
+      end)
+
+      it("contains_none_of rejects a numeric claim element against a string deny value", function()
+        set_jwt_claims({ perms = { 911 } })
+
+        plugin:access(make_config({
+          make_claim({ path = "perms", contains_none_of = { "911" } }),
+        }))
+
+        assert_rejected("perms")
+      end)
+
+      it("does_not_contain rejects when the claim is a JSON object instead of an array", function()
+        set_jwt_claims({ groups = { ["0"] = "banned-grp" } })
+
+        plugin:access(make_config({
+          make_claim({ path = "groups", does_not_contain = "banned-grp" }),
+        }))
+
+        assert_rejected("groups")
+      end)
+
+      it("contains_none_of rejects when the claim is a JSON object instead of an array", function()
+        set_jwt_claims({ groups = { ["0"] = "banned-grp" } })
+
+        plugin:access(make_config({
+          make_claim({ path = "groups", contains_none_of = { "banned-grp" } }),
+        }))
+
+        assert_rejected("groups")
+      end)
+
+      it("does not regress a legitimate array claim through the new shape check", function()
+        set_jwt_claims({ groups = { "admin", "user" } })
+
+        plugin:access(make_config({
+          make_claim({ path = "groups", contains = "admin" }),
+        }))
+
+        assert_allowed()
+      end)
+
+    end)
+
     describe("generalizing the HackerOne regression across every operator", function()
 
       -- Same shape as the HackerOne repro: an optional claim (missing,

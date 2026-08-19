@@ -1,5 +1,4 @@
 local jwt_decoder = require "kong.plugins.jwt.jwt_parser"
-local re_gmatch = ngx.re.gmatch
 local json = require "cjson"
 local kong = kong
 
@@ -10,61 +9,6 @@ local plugin = {
   -- with the parsed payload.
   PRIORITY = 999,
 }
-
-
----- A modified version of the one found in kong.plugin.jwt because
----- we cannot access the original retrieve_token() declared as local
----- to that plugin...
---- Retrieve a JWT in a request.
--- Checks for the JWT in URI parameters, then in cookies, and finally
--- in the configured header_names (defaults to `[Authorization]`).
--- @param conf Plugin configuration
--- @return token JWT token contained in request (can be a table) or nil
--- @return err
-local function retrieve_token(conf)
-
-  local args = kong.request.get_query()
-
-  for _, v in ipairs(conf.uri_param_names) do
-    if args[v] then
-      return args[v]
-    end
-  end
-
-  local var = ngx.var
-  for _, v in ipairs(conf.cookie_names) do
-    local cookie = var["cookie_" .. v]
-    if cookie and cookie ~= "" then
-      return cookie
-    end
-  end
-
-  local request_headers = kong.request.get_headers()
-  for _, v in ipairs(conf.header_names) do
-    local token_header = request_headers[v]
-    if token_header then
-      if type(token_header) == "table" then
-        token_header = token_header[1]
-      end
-      local iterator, iter_err = re_gmatch(token_header, "\\s*[Bb]earer\\s+(.+)")
-      if not iterator then
-        kong.log.err(iter_err)
-        break
-      end
-
-      local m, err = iterator()
-      if err then
-        kong.log.err(err)
-        break
-      end
-
-      if m and #m > 0 then
-        return m[1]
-      end
-    end
-  end
-
-end
 
 
 -- Traverses a table, and returns the item nested within based
@@ -107,17 +51,20 @@ local function extract_table_item(t, path)
 end
 
 
--- Retrieve the fully decoded JWT as provided in the incoming request
--- @param config Plugin configuration
+-- Retrieve the fully decoded JWT that the official kong jwt plugin already
+-- verified for this request. kong.ctx.shared.authenticated_jwt_token is
+-- only ever set (see set_consumer() in kong/plugins/jwt/handler.lua) after
+-- a successful signature verification -- it stays nil on the jwt plugin's
+-- anonymous-consumer fallback, when run_on_preflight skips verification,
+-- or if the jwt plugin never ran. Reading it here, rather than
+-- independently re-locating and decoding a token ourselves, ensures this
+-- plugin only ever evaluates claims from a token that was actually
+-- verified, and that it's the same token the jwt plugin verified.
 -- @return decoded_jwt object (can be a table) or nil
 -- @return err
-local function get_jwt_decoded(config)
+local function get_jwt_decoded()
 
-  local token, err = retrieve_token( config )
-  if err and not config.continue_on_error then
-    return responses.send_HTTP_INTERNAL_SERVER_ERROR(err)
-  end
-
+  local token = kong.ctx.shared.authenticated_jwt_token
   if token == nil then
     return {}, "Token could not be retrieved"
   end
@@ -172,12 +119,18 @@ end
 
 function plugin:access(config)
 
-  -- Find the JWT using the same types of configurations the
-  -- main JWT plugin uses, and return the decoded JWT object...
-  local decoded_jwt, err = get_jwt_decoded(config)
+  -- Use the token the official jwt plugin already verified for this
+  -- request, and return the decoded JWT object...
+  local decoded_jwt, err = get_jwt_decoded()
   if err and not config.continue_on_error then
     return kong.response.exit(500, "Internal server error")
   end
+
+  -- No verified token was available for this request at all (err set),
+  -- as opposed to a token being available but this particular claim path
+  -- being absent from it. A deny-list rule must never be satisfied by
+  -- the absence of any verifiable claims data whatsoever.
+  local no_verified_claims = (err ~= nil)
 
   -- Go through our configured claims, and do what's requested...
   for i, claim_config in ipairs(config.claims) do
@@ -191,8 +144,8 @@ function plugin:access(config)
       end
     end
     if claim_config.does_not_equal ~= nil then
-      if type(payload_claim_item) == "table" or tostring(payload_claim_item) == tostring(claim_config.does_not_equal) then
-        return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal.." or was an unexpected table/array shape")
+      if no_verified_claims or type(payload_claim_item) == "table" or tostring(payload_claim_item) == tostring(claim_config.does_not_equal) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal.." or was an unexpected table/array shape or no verified token was available")
       end
     end
     if #claim_config.equals_one_of ~= 0 then
@@ -211,7 +164,7 @@ function plugin:access(config)
     if #claim_config.equals_none_of ~= 0 then
       local match = false
       local check_count = 0
-      if type(payload_claim_item) == "table" then
+      if no_verified_claims or type(payload_claim_item) == "table" then
         match = true
       end
       for ei, ev in ipairs(claim_config.equals_none_of) do

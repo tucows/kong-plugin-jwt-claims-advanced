@@ -5,14 +5,22 @@
 -- claim configured after it -- including authorization checks such as
 -- `contains`/`equals`.
 --
--- The real Kong PDK, ngx, and `kong.plugins.jwt.jwt_parser` module are
--- only available inside a full Kong install, so this spec stubs the
--- minimal surface handler.lua actually touches. JWT decoding itself is
--- faked: the "token" used in tests IS the JSON-encoded claims payload,
--- and the fake jwt_parser just decodes it back into a `.claims` table.
--- This lets the test exercise the real claim-processing/authorization
--- logic in handler.lua without needing a signed JWT or a full Kong
--- runtime.
+-- The real Kong PDK and `kong.plugins.jwt.jwt_parser` module are only
+-- available inside a full Kong install, so this spec stubs the minimal
+-- surface handler.lua actually touches. JWT decoding itself is faked: the
+-- "token" used in tests IS the JSON-encoded claims payload, and the fake
+-- jwt_parser just decodes it back into a `.claims` table. This lets the
+-- test exercise the real claim-processing/authorization logic in
+-- handler.lua without needing a signed JWT or a full Kong runtime.
+--
+-- handler.lua reads kong.ctx.shared.authenticated_jwt_token rather than
+-- re-locating/decoding a token itself -- that field is only ever set by
+-- the official jwt plugin after a successful signature verification (see
+-- set_consumer() in kong/plugins/jwt/handler.lua), and stays nil on its
+-- anonymous-consumer fallback or when run_on_preflight skips
+-- verification. set_jwt_claims() below simulates "the jwt plugin
+-- verified this payload"; leaving it unset simulates "the jwt plugin did
+-- not verify anything on this request."
 
 local cjson = require "cjson"
 
@@ -28,30 +36,6 @@ package.preload["kong.plugins.jwt.jwt_parser"] = function()
   return fake_jwt_parser
 end
 
-_G.ngx = {
-  re = {
-    -- Minimal stand-in for ngx.re.gmatch, supporting only the single
-    -- pattern handler.lua uses to pull a bearer token out of a header.
-    gmatch = function(subject, _pattern)
-      local done = false
-      return function()
-        if done then
-          return nil
-        end
-        done = true
-        local token = subject:match("^%s*[Bb]earer%s+(.+)$")
-        if not token then
-          return nil
-        end
-        return { token }
-      end
-    end,
-  },
-  var = {},
-}
-
-local current_request_headers
-local current_query_args
 local recorded
 
 local function reset_recorder()
@@ -62,9 +46,8 @@ local function reset_recorder()
 end
 
 _G.kong = {
-  request = {
-    get_query = function() return current_query_args end,
-    get_headers = function() return current_request_headers end,
+  ctx = {
+    shared = {},
   },
   service = {
     request = {
@@ -90,16 +73,21 @@ _G.kong = {
 -- checkout without a full plugin install.
 local plugin = require "handler"
 
+-- Simulates the official jwt plugin having verified this payload and
+-- published it for downstream plugins.
 local function set_jwt_claims(claims)
-  current_request_headers = { authorization = "Bearer " .. cjson.encode(claims) }
+  kong.ctx.shared.authenticated_jwt_token = cjson.encode(claims)
 end
 
-local function set_jwt_claims_via_query(param_name, claims)
-  current_query_args = { [param_name] = cjson.encode(claims) }
-end
-
-local function set_jwt_claims_via_cookie(cookie_name, claims)
-  ngx.var["cookie_" .. cookie_name] = cjson.encode(claims)
+-- Simulates an unverified/forged Authorization header sitting on the
+-- request -- e.g. the jwt plugin fell back to its anonymous consumer, or
+-- run_on_preflight skipped verification -- without kong.ctx.shared.
+-- authenticated_jwt_token ever being set. handler.lua must not read this.
+local function set_unverified_request_header(claims)
+  kong.request = kong.request or {}
+  kong.request.get_headers = function()
+    return { authorization = "Bearer " .. cjson.encode(claims) }
+  end
 end
 
 local function make_claim(overrides)
@@ -153,9 +141,8 @@ describe("jwt-claims-advanced handler", function()
 
   before_each(function()
     reset_recorder()
-    current_request_headers = {}
-    current_query_args = {}
-    ngx.var = {}
+    kong.ctx.shared.authenticated_jwt_token = nil
+    kong.request = nil
   end)
 
   describe("optional claim followed by an authorization claim (HackerOne #3940956)", function()
@@ -462,61 +449,11 @@ describe("jwt-claims-advanced handler", function()
 
   end)
 
-  describe("token retrieval", function()
+  describe("trusting only the jwt-plugin-verified token (security review finding: CWE-347)", function()
 
-    it("finds the JWT via a configured uri_param_name", function()
-      set_jwt_claims_via_query("jwt", { role = "admin" })
-
-      plugin:access(make_config(
-        { make_claim({ path = "role", equals = "admin" }) },
-        { uri_param_names = { "jwt" } }
-      ))
-
-      assert_allowed()
-    end)
-
-    it("finds the JWT via a configured cookie_name", function()
-      set_jwt_claims_via_cookie("jwt", { role = "admin" })
-
-      plugin:access(make_config(
-        { make_claim({ path = "role", equals = "admin" }) },
-        { cookie_names = { "jwt" } }
-      ))
-
-      assert_allowed()
-    end)
-
-    it("checks each configured header_name in order, using whichever is present", function()
-      set_jwt_claims({ role = "admin" }) -- lands on the default "authorization" header
-
-      plugin:access(make_config(
-        { make_claim({ path = "role", equals = "admin" }) },
-        { header_names = { "x-custom-jwt", "authorization" } }
-      ))
-
-      assert_allowed()
-    end)
-
-    it("handles a header value provided as a table (repeated header)", function()
-      local token = "Bearer " .. cjson.encode({ role = "admin" })
-      current_request_headers = { authorization = { token, "Bearer some-other-token" } }
-
-      plugin:access(make_config({ make_claim({ path = "role", equals = "admin" }) }))
-
-      assert_allowed()
-    end)
-
-    it("treats a header that doesn't match the Bearer pattern as no token found", function()
-      current_request_headers = { authorization = "Basic dXNlcjpwYXNz" }
-
-      plugin:access(make_config({ make_claim({ path = "groups", contains = "admin" }) }))
-
-      assert_rejected("groups")
-    end)
-
-    it("when continue_on_error is true and no token is found anywhere, allow_undefined claims still pass through", function()
-      -- current_request_headers / current_query_args / ngx.var are all
-      -- empty from before_each -- no token available via any transport.
+    it("when continue_on_error is true and no token was ever verified, allow_undefined claims still pass through", function()
+      -- kong.ctx.shared.authenticated_jwt_token is nil from before_each --
+      -- e.g. no jwt plugin ran, or the route genuinely has no JWT context.
       plugin:access(make_config({
         make_claim({ path = "filler", output_header = "X-Filler", allow_undefined = true }),
       }))
@@ -525,7 +462,7 @@ describe("jwt-claims-advanced handler", function()
       assert.are.equal("", header_value("X-Filler"))
     end)
 
-    it("when continue_on_error is false and no token is found anywhere, exits with 500", function()
+    it("when continue_on_error is false and no token was ever verified, exits with 500", function()
       plugin:access(make_config(
         { make_claim({ path = "filler", output_header = "X-Filler", allow_undefined = true }) },
         { continue_on_error = false }
@@ -534,6 +471,90 @@ describe("jwt-claims-advanced handler", function()
       assert.are.equal(1, #recorded.exit_calls)
       assert.are.equal(500, recorded.exit_calls[1].status)
       assert.are.equal("Internal server error", recorded.exit_calls[1].body)
+    end)
+
+    it("processes claims from kong.ctx.shared.authenticated_jwt_token when the jwt plugin verified a token", function()
+      set_jwt_claims({ role = "admin" })
+
+      plugin:access(make_config({ make_claim({ path = "role", equals = "admin" }) }))
+
+      assert_allowed()
+    end)
+
+    it("ignores an unverified/forged Authorization header entirely, even when it satisfies an allow-list rule", function()
+      -- No jwt plugin ran (or it fell back to anonymous / skipped
+      -- verification on preflight), so kong.ctx.shared.authenticated_jwt_token
+      -- is nil -- but the request still carries a self-signed, unverified
+      -- token with admin claims. It must never be consulted.
+      set_unverified_request_header({ requestor = { groups = { "admin-grp" } } })
+
+      plugin:access(make_config({
+        make_claim({ path = "requestor.groups", contains = "admin-grp" }),
+      }))
+
+      assert_rejected("requestor.groups")
+    end)
+
+    it("does not forward an output_header value sourced from an unverified request header", function()
+      set_unverified_request_header({ requestor = { id = "admin" } })
+
+      plugin:access(make_config({
+        make_claim({ path = "requestor.id", output_header = "X-JWT-Requestor-ID", allow_undefined = true }),
+      }))
+
+      assert_allowed()
+      assert.are.equal("", header_value("X-JWT-Requestor-ID"))
+    end)
+
+  end)
+
+  describe("deny-list rules must not pass by default when no token was ever verified (security review finding: CWE-636)", function()
+
+    -- Scenario A (the bug): no jwt plugin ran at all (or it fell back to
+    -- anonymous / skipped verification), so there's no verified claims
+    -- data whatsoever. A deny-list rule must reject rather than silently
+    -- pass just because there's nothing to compare against.
+
+    it("does_not_equal rejects when no token was ever verified, not just when the value actually matches", function()
+      plugin:access(make_config({
+        make_claim({ path = "tenant", does_not_equal = "banned-tenant" }),
+      }))
+
+      assert_rejected("tenant")
+    end)
+
+    it("equals_none_of rejects when no token was ever verified, not just when the value actually matches", function()
+      plugin:access(make_config({
+        make_claim({ path = "tenant", equals_none_of = { "banned-tenant", "suspended-tenant" } }),
+      }))
+
+      assert_rejected("tenant")
+    end)
+
+    -- Scenario B (left alone, deliberately): a token WAS verified, this
+    -- specific optional claim just isn't present in it. Absence here is
+    -- legitimate data, not a failure to obtain a token -- does_not_equal/
+    -- equals_none_of passing in this case is existing, intended behavior
+    -- for optional claims, and out of scope for this finding.
+
+    it("documents current behavior: does_not_equal still passes when a verified token simply lacks this optional claim", function()
+      set_jwt_claims({ role = "user" }) -- verified token, but no "tenant" claim at all
+
+      plugin:access(make_config({
+        make_claim({ path = "tenant", does_not_equal = "banned-tenant" }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("documents current behavior: equals_none_of still passes when a verified token simply lacks this optional claim", function()
+      set_jwt_claims({ role = "user" })
+
+      plugin:access(make_config({
+        make_claim({ path = "tenant", equals_none_of = { "banned-tenant" } }),
+      }))
+
+      assert_allowed()
     end)
 
   end)

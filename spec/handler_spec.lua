@@ -79,6 +79,14 @@ local function set_jwt_claims(claims)
   kong.ctx.shared.authenticated_jwt_token = cjson.encode(claims)
 end
 
+-- Same as set_jwt_claims(), but takes a raw JSON string. Needed for
+-- fixtures cjson.encode() can't produce from a Lua table literal -- most
+-- notably an explicit JSON `null`, which decodes to the cjson.null
+-- sentinel (not Lua nil, and not omittable from a table literal).
+local function set_verified_token_raw(json_string)
+  kong.ctx.shared.authenticated_jwt_token = json_string
+end
+
 -- Simulates an unverified/forged Authorization header sitting on the
 -- request -- e.g. the jwt plugin fell back to its anonymous consumer, or
 -- run_on_preflight skipped verification -- without kong.ctx.shared.
@@ -556,6 +564,218 @@ describe("jwt-claims-advanced handler", function()
 
       assert_allowed()
     end)
+
+  end)
+
+  describe("comprehensive operator x claim-shape coverage", function()
+
+    -- Every scalar operator (equals, does_not_equal, equals_one_of,
+    -- equals_none_of) crossed against every JSON shape a `role` claim
+    -- could realistically take. "allow_family" operators are satisfied
+    -- by a genuine match; "deny_family" operators are satisfied by the
+    -- absence of one -- so the same shape produces opposite expected
+    -- outcomes depending on which family is being evaluated.
+    local scalar_operators = {
+      { name = "equals", family = "allow_family",
+        make = function(v) return { path = "role", equals = v } end },
+      { name = "does_not_equal", family = "deny_family",
+        make = function(v) return { path = "role", does_not_equal = v } end },
+      { name = "equals_one_of", family = "allow_family",
+        make = function(v) return { path = "role", equals_one_of = { v, "unrelated-value" } } end },
+      { name = "equals_none_of", family = "deny_family",
+        make = function(v) return { path = "role", equals_none_of = { v, "unrelated-value" } } end },
+    }
+
+    local role_shapes = {
+      {
+        name = "missing claim (path absent, but the token itself is verified)",
+        claims = {},
+        configured_value = "admin",
+        allow_family = "reject", -- absent claim never equals "admin"
+        deny_family = "allow",   -- absent optional claim: documented pass-through (scenario B)
+      },
+      {
+        name = "explicit JSON null",
+        claims_json = '{"role": null}',
+        configured_value = "admin",
+        allow_family = "reject", -- cjson.null never equals "admin"
+        deny_family = "allow",   -- null behaves the same as absent here
+      },
+      {
+        name = "matching string scalar",
+        claims = { role = "admin" },
+        configured_value = "admin",
+        allow_family = "allow",
+        deny_family = "reject",
+      },
+      {
+        name = "mismatched string scalar",
+        claims = { role = "user" },
+        configured_value = "admin",
+        allow_family = "reject",
+        deny_family = "allow",
+      },
+      {
+        name = "matching value as a JSON number compared against a string operand",
+        claims_json = '{"role": 911}',
+        configured_value = "911",
+        allow_family = "allow", -- tostring() coercion: 911 == "911"
+        deny_family = "reject",
+      },
+      {
+        name = "value wrapped in an array (type/shape bypass attempt)",
+        claims = { role = { "admin" } },
+        configured_value = "admin",
+        allow_family = "reject", -- a table never equals a scalar
+        deny_family = "reject",  -- security fix: table shape fails closed rather than silently passing
+      },
+      {
+        name = "value wrapped in an object (type/shape bypass attempt)",
+        claims = { role = { nested = "admin" } },
+        configured_value = "admin",
+        allow_family = "reject",
+        deny_family = "reject",  -- same table-shape guard, regardless of array vs object
+      },
+    }
+
+    for _, shape in ipairs(role_shapes) do
+      describe(shape.name, function()
+        for _, op in ipairs(scalar_operators) do
+          local expected = shape[op.family]
+
+          it(op.name .. " -> expect " .. expected, function()
+            if shape.claims_json then
+              set_verified_token_raw(shape.claims_json)
+            else
+              set_jwt_claims(shape.claims)
+            end
+
+            plugin:access(make_config({ make_claim(op.make(shape.configured_value)) }))
+
+            if expected == "allow" then
+              assert_allowed()
+            else
+              assert_rejected("role")
+            end
+          end)
+        end
+      end)
+    end
+
+    -- Every contains-family operator (contains, does_not_contain,
+    -- contains_one_of, contains_none_of) crossed against every JSON
+    -- shape a `groups` claim could realistically take. Unlike the
+    -- scalar operators above, a shape that isn't a real JSON array
+    -- (missing/null/scalar/object-masquerading-as-array) is rejected
+    -- for BOTH families -- these operators only make sense against an
+    -- array, so an unexpected shape fails closed either way.
+    local contains_operators = {
+      { name = "contains", family = "allow_family",
+        make = function(v) return { path = "groups", contains = v } end },
+      { name = "does_not_contain", family = "deny_family",
+        make = function(v) return { path = "groups", does_not_contain = v } end },
+      { name = "contains_one_of", family = "allow_family",
+        make = function(v) return { path = "groups", contains_one_of = { v, "unrelated-value" } } end },
+      { name = "contains_none_of", family = "deny_family",
+        make = function(v) return { path = "groups", contains_none_of = { v, "unrelated-value" } } end },
+    }
+
+    local groups_shapes = {
+      {
+        name = "missing claim (path absent, but the token itself is verified)",
+        claims = {},
+        configured_value = "admin",
+        allow_family = "reject",
+        deny_family = "reject", -- not an array -> fails closed for both families
+      },
+      {
+        name = "explicit JSON null",
+        claims_json = '{"groups": null}',
+        configured_value = "admin",
+        allow_family = "reject",
+        deny_family = "reject",
+      },
+      {
+        name = "string scalar instead of an array",
+        claims = { groups = "admin" },
+        configured_value = "admin",
+        allow_family = "reject",
+        deny_family = "reject",
+      },
+      {
+        name = "number scalar instead of an array",
+        claims_json = '{"groups": 911}',
+        configured_value = "911",
+        allow_family = "reject",
+        deny_family = "reject",
+      },
+      {
+        name = "JSON object masquerading as an array",
+        claims = { groups = { ["0"] = "admin" } },
+        configured_value = "admin",
+        allow_family = "reject", -- security fix: shape check, not just "is it a table"
+        deny_family = "reject",
+      },
+      {
+        name = "proper array containing the value",
+        claims = { groups = { "admin", "user" } },
+        configured_value = "admin",
+        allow_family = "allow",
+        deny_family = "reject",
+      },
+      {
+        name = "proper array not containing the value",
+        claims = { groups = { "user", "guest" } },
+        configured_value = "admin",
+        allow_family = "reject",
+        deny_family = "allow",
+      },
+      {
+        name = "proper array containing the value as a different JSON type (type coercion)",
+        claims_json = '{"groups": [911]}',
+        configured_value = "911",
+        allow_family = "allow", -- security fix: 911 == "911" via tostring()
+        deny_family = "reject",
+      },
+      {
+        name = "proper array containing the value alongside an unrelated nested array element",
+        claims = { groups = { "admin", { "nested" } } },
+        configured_value = "admin",
+        allow_family = "allow", -- the nested element is safely skipped, not compared raw
+        deny_family = "reject",
+      },
+      {
+        name = "proper array containing a null element but not the configured value",
+        claims_json = '{"groups": [null, "user"]}',
+        configured_value = "admin",
+        allow_family = "reject", -- the null element is safely skipped, not a crash
+        deny_family = "allow",
+      },
+    }
+
+    for _, shape in ipairs(groups_shapes) do
+      describe(shape.name, function()
+        for _, op in ipairs(contains_operators) do
+          local expected = shape[op.family]
+
+          it(op.name .. " -> expect " .. expected, function()
+            if shape.claims_json then
+              set_verified_token_raw(shape.claims_json)
+            else
+              set_jwt_claims(shape.claims)
+            end
+
+            plugin:access(make_config({ make_claim(op.make(shape.configured_value)) }))
+
+            if expected == "allow" then
+              assert_allowed()
+            else
+              assert_rejected("groups")
+            end
+          end)
+        end
+      end)
+    end
 
   end)
 

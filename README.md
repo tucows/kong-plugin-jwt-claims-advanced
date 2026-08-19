@@ -158,6 +158,45 @@ Checks the array at the given location specified by path to make sure that it ha
 
 Checks the array at the given location specified by path to make sure that it has no element that is equal to any of the given values in this configuration.  If it does, then processing stops, and a 403/unauthorized is returned out.
 
+## Running Tests
+
+Tests are written using [busted](https://lunarmodules.github.io/busted/), the standard test framework used across Kong plugins. They stub the minimal Kong PDK surface (`kong.*`, `ngx.*`) and the `kong.plugins.jwt.jwt_parser` module so `handler.lua` can be exercised directly, without a full Kong install.
+
+Install the tooling (once):
+
+```
+luarocks install busted
+luarocks install lua-cjson
+```
+
+Run the test suite from the repo root:
+
+```
+make test
+```
+
+## Building the Rock
+
+There are two build targets, for two different purposes:
+
+- `make local-build` -- builds straight from your working tree (via `luarocks make`), with no git fetch involved. Use this while developing, to sanity-check that the rockspec/build table still works, before you've tagged anything.
+- `make build` -- the release build (via `luarocks build`). This fetches source from the git tag referenced in the rockspec's `source.url`/`source.tag` fields, so it only works once that tag has been pushed to the remote. This is the reproducible build anyone (CI, another dev, luarocks.org) would get if they built this same version later -- see "Releasing a New Version" below.
+
+## Releasing a New Version
+
+**Only ever tag on `main`, and only after the version-bump changes have actually landed there.** The rockspec's `source.tag` points at a specific commit on the upstream remote, so tagging a feature branch (or tagging before the PR is merged) means the tag doesn't point at the commit `main` actually ends up with -- `make build` (and anyone else building this version later) would fetch the wrong source, or fail if the branch is later deleted.
+
+1. Decide on the new version number, e.g. `0.5-0`.
+2. On your feature branch, rename the rockspec to match: `git mv kong-plugin-jwt-claims-advanced-<old>.rockspec kong-plugin-jwt-claims-advanced-<new>.rockspec`.
+3. Update the `version` and `source.tag` fields inside the renamed rockspec to match (e.g. `version = "0.5-0"`, `tag = "v0.5-0"`).
+4. Run `make test` and `make local-build` to confirm everything still works.
+5. Commit the version bump and open a PR against `main` as usual (do **not** tag yet).
+6. Once the PR is reviewed and merged into `main`, switch to `main` and pull the merge commit: `git checkout main && git pull`.
+7. Tag that commit on `main` to match the rockspec version exactly: `git tag v0.5-0`.
+8. Push the tag: `git push origin v0.5-0`.
+9. Build the release rock from that tag: `make build`.
+10. (Optional) Publish the rock -- e.g. `luarocks upload kong-plugin-jwt-claims-advanced-0.5-0.rockspec` if publishing to luarocks.org, or attach the packed `.rock` file to a GitHub release.
+
 ## Notes
 
-- To build the rock file: `luarocks build --local --pack-binary-rock kong-plugin-jwt-claims-advanced-*.rockspec`
+- Building/releasing: see "Building the Rock" and "Releasing a New Version" above.

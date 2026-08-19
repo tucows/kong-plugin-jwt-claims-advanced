@@ -255,14 +255,14 @@ function plugin:access(config)
     if claim_config.output_header ~= nil then
       if payload_claim_item == nil and claim_config.allow_undefined then
         kong.service.request.set_header(claim_config.output_header, "")
-        return
+      else
+        local payload_claim_item_as_text = payload_claim_item
+        if type(payload_claim_item) == "table" then
+          payload_claim_item_as_text = json.encode(payload_claim_item)
+        end
+        -- Set header on upstream request
+        kong.service.request.set_header(claim_config.output_header, payload_claim_item_as_text)
       end
-      local payload_claim_item_as_text = payload_claim_item
-      if type(payload_claim_item) == "table" then
-        payload_claim_item_as_text = json.encode(payload_claim_item)
-      end
-      -- Set header on upstream request
-      kong.service.request.set_header(claim_config.output_header, payload_claim_item_as_text)
     end
 
   end

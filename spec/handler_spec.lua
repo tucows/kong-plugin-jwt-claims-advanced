@@ -694,6 +694,20 @@ describe("jwt-claims-advanced handler", function()
         allow_family = "reject",
         deny_family = "reject",  -- same table-shape guard, regardless of array vs object
       },
+      {
+        name = "matching value as a JSON boolean compared against a string operand",
+        claims_json = '{"role": true}',
+        configured_value = "true",
+        allow_family = "allow", -- tostring() coercion: true == "true"
+        deny_family = "reject",
+      },
+      {
+        name = "mismatched JSON boolean",
+        claims_json = '{"role": false}',
+        configured_value = "true",
+        allow_family = "reject",
+        deny_family = "allow",
+      },
     }
 
     for _, shape in ipairs(role_shapes) do
@@ -809,6 +823,20 @@ describe("jwt-claims-advanced handler", function()
         allow_family = "reject", -- the null element is safely skipped, not a crash
         deny_family = "allow",
       },
+      {
+        name = "empty array (a real array with zero elements)",
+        claims_json = '{"groups": []}',
+        configured_value = "admin",
+        allow_family = "reject", -- valid array shape, but nothing in it can match
+        deny_family = "allow",   -- valid array shape, so it fails closed on shape but passes on membership
+      },
+      {
+        name = "proper array containing the value as a JSON boolean compared against a string operand",
+        claims_json = '{"groups": [true, "user"]}',
+        configured_value = "true",
+        allow_family = "allow", -- tostring() coercion: true == "true"
+        deny_family = "reject",
+      },
     }
 
     for _, shape in ipairs(groups_shapes) do
@@ -834,6 +862,108 @@ describe("jwt-claims-advanced handler", function()
         end
       end)
     end
+
+  end)
+
+  describe("multi-value list operators check every configured element, not just the first", function()
+
+    it("equals_one_of allows when the claim matches the second configured value", function()
+      set_jwt_claims({ role = "admin" })
+
+      plugin:access(make_config({
+        make_claim({ path = "role", equals_one_of = { "unrelated-value", "admin" } }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("equals_none_of rejects when the claim matches the second configured value", function()
+      set_jwt_claims({ role = "admin" })
+
+      plugin:access(make_config({
+        make_claim({ path = "role", equals_none_of = { "unrelated-value", "admin" } }),
+      }))
+
+      assert_rejected("role")
+    end)
+
+    it("contains_one_of allows when the claim matches the second configured value", function()
+      set_jwt_claims({ groups = { "admin" } })
+
+      plugin:access(make_config({
+        make_claim({ path = "groups", contains_one_of = { "unrelated-value", "admin" } }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("contains_none_of rejects when the claim matches the second configured value", function()
+      set_jwt_claims({ groups = { "admin" } })
+
+      plugin:access(make_config({
+        make_claim({ path = "groups", contains_none_of = { "unrelated-value", "admin" } }),
+      }))
+
+      assert_rejected("groups")
+    end)
+
+  end)
+
+  describe("continue_on_error interaction with a valid, successfully verified token", function()
+
+    it("continue_on_error = false does not interfere when the token verifies and decodes cleanly", function()
+      set_jwt_claims({ role = "admin" })
+
+      plugin:access(make_config(
+        { make_claim({ path = "role", equals = "admin" }) },
+        { continue_on_error = false }
+      ))
+
+      assert_allowed()
+    end)
+
+  end)
+
+  describe("dotted-path traversal cannot index into a JSON array by position", function()
+
+    it("documents current behavior: a numeric path segment does not reach an array element", function()
+      set_jwt_claims({ items = { "a", "b" } })
+
+      plugin:access(make_config({
+        make_claim({ path = "items.0", output_header = "X-Item" }),
+      }))
+
+      assert_allowed()
+
+      local found = false
+      for _, h in ipairs(recorded.headers_set) do
+        if h.name == "X-Item" then
+          found = true
+          assert.is_nil(h.value)
+        end
+      end
+      assert.is_true(found)
+    end)
+
+  end)
+
+  describe("a plugin instance with no configured claims", function()
+
+    it("is a pure pass-through regardless of whether a token was verified", function()
+      set_jwt_claims({ role = "admin" })
+
+      plugin:access(make_config({}))
+
+      assert_allowed()
+      assert.are.equal(0, #recorded.headers_set)
+    end)
+
+    it("is a pure pass-through when no token was ever verified either", function()
+      plugin:access(make_config({}))
+
+      assert_allowed()
+      assert.are.equal(0, #recorded.headers_set)
+    end)
 
   end)
 

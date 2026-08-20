@@ -73,7 +73,10 @@ plugins:
 - name: jwt-claims-advanced
   service: service1
   config:
-    # If the JWT's configs for header_names, cookie_names, or uri_param_names are customized above, then this plugin needs to be configured to match, as it finds the JWT in the same way the official JWT plugin does, but cannot access those configs, so we need them duplicated here if customized.
+    # This plugin only ever evaluates the token that the jwt plugin itself
+    # already verified for this request -- it does not locate a JWT on its
+    # own, so there is nothing to keep in sync with the jwt plugin's own
+    # header_names/cookie_names/uri_param_names settings.
     claims:
     - path: requestor
       output_header: X-JWT-Requestor
@@ -94,6 +97,15 @@ plugins:
 ## Configuration Options
 
 The below examples assume the JWT is in the format as previously described above.
+
+### continue_on_error (optional)
+
+Values can be either true or false (true is the default). This plugin only ever evaluates claims from the token that the official jwt plugin already verified for this request; it never locates or decodes a token on its own. If no such verified token is available for the request -- for example, no jwt plugin ran, it fell back to its `anonymous` consumer, or `run_on_preflight` skipped verification -- then `continue_on_error` controls what happens next:
+
+- `true`: processing continues with no claims data available. Allow-list rules (`equals`, `contains`, etc.) will fail closed (403), since there's nothing to satisfy them. Deny-list rules (`does_not_equal`, `equals_none_of`, etc.) also fail closed in this case, rather than passing simply because there's no value to compare against.
+- `false`: the plugin immediately returns a 500 Internal server error instead of evaluating any claims.
+
+This does not affect requests where a token was verified but a specific optional claim happens to be missing from it -- that is governed by `allow_undefined` on the individual claim instead.
 
 ### path (required)
 
@@ -124,7 +136,7 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
 
 ### allow_undefined (optional)
 
-Values can be either true or false (false is the default). When this option is enabled it will set the value of HTTP header for this claim to an empty string if the claim doesn't exist or is holding a value of undefined or null. If not, then the claim is required and should be part of the payload
+Values can be either true or false (false is the default), and only applies when `output_header` is also configured. When this option is enabled it will set the value of the HTTP header for this claim to an empty string if the claim doesn't exist or is holding a value of undefined or null. If not, then the claim is required: a missing or null claim causes processing to stop, and a 403/unauthorized is returned out, rather than the header ever being set.
 
 ### equals
 

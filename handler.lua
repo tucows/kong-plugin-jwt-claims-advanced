@@ -232,8 +232,17 @@ function plugin:access(config)
 
     -- Output in headers...
     if claim_config.output_header ~= nil then
-      if (payload_claim_item == nil or payload_claim_item == json.null) and claim_config.allow_undefined then
-        kong.service.request.set_header(claim_config.output_header, "")
+      if payload_claim_item == nil or payload_claim_item == json.null then
+        if claim_config.allow_undefined then
+          kong.service.request.set_header(claim_config.output_header, "")
+        else
+          -- allow_undefined is false (the default): this claim is
+          -- required, per the documented contract, and a nil/null value
+          -- is never valid to forward as a header (Kong's PDK rejects
+          -- it outright), so treat a required-but-absent claim as a
+          -- failed claim rather than crashing or silently proceeding.
+          return unauthorized_due_to_failed_claim(claim_config.path, "required claim was missing or null")
+        end
       else
         local payload_claim_item_as_text = payload_claim_item
         if type(payload_claim_item) == "table" then

@@ -411,23 +411,20 @@ describe("jwt-claims-advanced handler", function()
       assert.are.equal(cjson.encode(groups), header_value("X-Groups"))
     end)
 
-    it("documents current behavior: a required claim that's missing forwards a nil header value", function()
+    it("rejects when a required (non-allow_undefined) claim with output_header is missing, rather than forwarding a nil header value", function()
+      -- Regression test: previously this fell through to
+      -- kong.service.request.set_header(header, nil), which is a Lua
+      -- runtime error against Kong's real PDK (only string/number/boolean
+      -- header values are accepted). A required claim that's genuinely
+      -- absent is now treated as a failed claim instead.
       set_jwt_claims({})
 
       plugin:access(make_config({
         make_claim({ path = "missing_claim", output_header = "X-Missing", allow_undefined = false }),
       }))
 
-      assert_allowed()
-
-      local found = false
-      for _, h in ipairs(recorded.headers_set) do
-        if h.name == "X-Missing" then
-          found = true
-          assert.is_nil(h.value)
-        end
-      end
-      assert.is_true(found)
+      assert_rejected("missing_claim")
+      assert.is_nil(header_value("X-Missing"))
     end)
 
     it("allow_undefined treats an explicit JSON null the same as a missing claim (matches documented behavior)", function()
@@ -441,23 +438,15 @@ describe("jwt-claims-advanced handler", function()
       assert.are.equal("", header_value("X-Role"))
     end)
 
-    it("documents current behavior: a required (non-allow_undefined) claim holding null forwards the raw value", function()
+    it("rejects when a required (non-allow_undefined) claim holds an explicit JSON null, rather than forwarding the raw null value", function()
       set_verified_token_raw('{"role": null}')
 
       plugin:access(make_config({
         make_claim({ path = "role", output_header = "X-Role", allow_undefined = false }),
       }))
 
-      assert_allowed()
-
-      local found = false
-      for _, h in ipairs(recorded.headers_set) do
-        if h.name == "X-Role" then
-          found = true
-          assert.are.equal(cjson.null, h.value)
-        end
-      end
-      assert.is_true(found)
+      assert_rejected("role")
+      assert.is_nil(header_value("X-Role"))
     end)
 
   end)
@@ -929,20 +918,16 @@ describe("jwt-claims-advanced handler", function()
     it("documents current behavior: a numeric path segment does not reach an array element", function()
       set_jwt_claims({ items = { "a", "b" } })
 
+      -- allow_undefined: true here so this test isolates the path-
+      -- traversal behavior specifically -- otherwise the claim resolving
+      -- to nil would be caught by the required-claim-missing rejection
+      -- (see "output_header value forwarding" describe block) instead.
       plugin:access(make_config({
-        make_claim({ path = "items.0", output_header = "X-Item" }),
+        make_claim({ path = "items.0", output_header = "X-Item", allow_undefined = true }),
       }))
 
       assert_allowed()
-
-      local found = false
-      for _, h in ipairs(recorded.headers_set) do
-        if h.name == "X-Item" then
-          found = true
-          assert.is_nil(h.value)
-        end
-      end
-      assert.is_true(found)
+      assert.are.equal("", header_value("X-Item"))
     end)
 
   end)

@@ -70,6 +70,10 @@ local function get_jwt_decoded()
   end
 
   local decoded_jwt, err = jwt_decoder:new(token)
+  if decoded_jwt == nil then
+    return {}, err
+  end
+
   return decoded_jwt, err
 
 end
@@ -228,7 +232,7 @@ function plugin:access(config)
 
     -- Output in headers...
     if claim_config.output_header ~= nil then
-      if payload_claim_item == nil and claim_config.allow_undefined then
+      if (payload_claim_item == nil or payload_claim_item == json.null) and claim_config.allow_undefined then
         kong.service.request.set_header(claim_config.output_header, "")
       else
         local payload_claim_item_as_text = payload_claim_item

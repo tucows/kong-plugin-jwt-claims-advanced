@@ -430,6 +430,36 @@ describe("jwt-claims-advanced handler", function()
       assert.is_true(found)
     end)
 
+    it("allow_undefined treats an explicit JSON null the same as a missing claim (matches documented behavior)", function()
+      set_verified_token_raw('{"role": null}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", output_header = "X-Role", allow_undefined = true }),
+      }))
+
+      assert_allowed()
+      assert.are.equal("", header_value("X-Role"))
+    end)
+
+    it("documents current behavior: a required (non-allow_undefined) claim holding null forwards the raw value", function()
+      set_verified_token_raw('{"role": null}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", output_header = "X-Role", allow_undefined = false }),
+      }))
+
+      assert_allowed()
+
+      local found = false
+      for _, h in ipairs(recorded.headers_set) do
+        if h.name == "X-Role" then
+          found = true
+          assert.are.equal(cjson.null, h.value)
+        end
+      end
+      assert.is_true(found)
+    end)
+
   end)
 
   describe("nested claim path traversal", function()
@@ -471,6 +501,34 @@ describe("jwt-claims-advanced handler", function()
     end)
 
     it("when continue_on_error is false and no token was ever verified, exits with 500", function()
+      plugin:access(make_config(
+        { make_claim({ path = "filler", output_header = "X-Filler", allow_undefined = true }) },
+        { continue_on_error = false }
+      ))
+
+      assert.are.equal(1, #recorded.exit_calls)
+      assert.are.equal(500, recorded.exit_calls[1].status)
+      assert.are.equal("Internal server error", recorded.exit_calls[1].body)
+    end)
+
+    it("when continue_on_error is true and the verified token fails to decode, does not crash and treats claims as absent", function()
+      -- kong.ctx.shared.authenticated_jwt_token is set (a token WAS
+      -- verified by the jwt plugin) but is not valid JSON, so decoding it
+      -- fails. This must degrade the same way "no token at all" does,
+      -- not raise a Lua runtime error from indexing a nil decoded_jwt.
+      set_verified_token_raw("not-valid-json")
+
+      plugin:access(make_config({
+        make_claim({ path = "filler", output_header = "X-Filler", allow_undefined = true }),
+      }))
+
+      assert_allowed()
+      assert.are.equal("", header_value("X-Filler"))
+    end)
+
+    it("when continue_on_error is false and the verified token fails to decode, exits with 500", function()
+      set_verified_token_raw("not-valid-json")
+
       plugin:access(make_config(
         { make_claim({ path = "filler", output_header = "X-Filler", allow_undefined = true }) },
         { continue_on_error = false }

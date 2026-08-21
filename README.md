@@ -174,18 +174,13 @@ Checks the array at the given location specified by path to make sure that it ha
 
 Tests are written using [busted](https://lunarmodules.github.io/busted/), the standard test framework used across Kong plugins. They stub the minimal Kong PDK surface (`kong.*`, `ngx.*`) and the `kong.plugins.jwt.jwt_parser` module so `handler.lua` can be exercised directly, without a full Kong install.
 
-Install the tooling (once):
-
-```
-luarocks install busted
-luarocks install lua-cjson
-```
-
 Run the test suite from the repo root:
 
 ```
 make test
 ```
+
+This installs the required tooling first (via the `dependencies` target: `lua`/`luarocks` through your platform's package manager on Debian/Ubuntu or macOS, then the `busted`/`lua-cjson` rocks) before running `busted spec/`. To just install the tooling without running tests, use `make dependencies`.
 
 ## Building the Rock
 

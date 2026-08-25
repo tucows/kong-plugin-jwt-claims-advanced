@@ -854,6 +854,95 @@ describe("jwt-claims-advanced handler", function()
 
   end)
 
+  -- Regression coverage for a tostring()-coercion bypass: JSON 1.0 decodes
+  -- to Lua number 1, and tostring(1) is "1", not "1.0". A comparator that
+  -- stringifies the JWT-side value before comparing would therefore let
+  -- does_not_equal/equals_none_of pass a forbidden value of "1.0" straight
+  -- through. The fix compares numerically on both sides instead.
+  describe("numeric comparisons are precision/format-aware, not string-formatting-aware", function()
+
+    it("does_not_equal rejects a forbidden float value even when the claim encodes it without a fractional part", function()
+      set_verified_token_raw('{"role": 1.0}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", does_not_equal = "1.0" }),
+      }))
+
+      assert_rejected("role")
+    end)
+
+    it("equals_none_of rejects a forbidden float value even when the claim encodes it without a fractional part", function()
+      set_verified_token_raw('{"role": 1.0}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", equals_none_of = { "1.0" } }),
+      }))
+
+      assert_rejected("role")
+    end)
+
+    it("equals allows a float-configured value to match a claim encoded without a fractional part", function()
+      set_verified_token_raw('{"role": 1}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", equals = "1.0" }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("equals_one_of allows a differently-formatted numeric match (scientific notation vs plain)", function()
+      set_verified_token_raw('{"role": 100}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", equals_one_of = { "1e2" } }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("does_not_equal still rejects a matching integer value (no regression on the common case)", function()
+      set_jwt_claims({ role = 911 })
+
+      plugin:access(make_config({
+        make_claim({ path = "role", does_not_equal = "911" }),
+      }))
+
+      assert_rejected("role")
+    end)
+
+    it("does_not_equal allows a fractional claim value that differs from the forbidden one", function()
+      set_verified_token_raw('{"role": 1.1}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", does_not_equal = "1.2" }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("does_not_equal rejects a fractional claim value that exactly matches the forbidden one", function()
+      set_verified_token_raw('{"role": 1.2}')
+
+      plugin:access(make_config({
+        make_claim({ path = "role", does_not_equal = "1.2" }),
+      }))
+
+      assert_rejected("role")
+    end)
+
+    it("equals rejects when the claim is numeric but the configured value isn't a valid number", function()
+      set_jwt_claims({ role = 911 })
+
+      plugin:access(make_config({
+        make_claim({ path = "role", equals = "admin" }),
+      }))
+
+      assert_rejected("role")
+    end)
+
+  end)
+
   describe("multi-value list operators check every configured element, not just the first", function()
 
     it("equals_one_of allows when the claim matches the second configured value", function()

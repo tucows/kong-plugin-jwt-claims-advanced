@@ -79,10 +79,46 @@ local function get_jwt_decoded()
 end
 
 
+-- Compares a decoded JWT claim value against a configured comparison
+-- operand (always a string, per schema.lua) in a type-aware way, rather
+-- than via tostring() coercion. tostring() reformats Lua numbers (e.g. a
+-- JSON 1.0 decodes to Lua number 1, which tostring()s as "1", not "1.0"),
+-- so a forbidden value of "1.0" would silently fail to match -- letting
+-- does_not_equal/equals_none_of pass when they should reject. Comparing
+-- numerically on both sides is immune to that formatting mismatch.
+local function values_equal(payload_value, configured_value)
+
+  if type(payload_value) == "table" then
+    return false
+  end
+
+  if payload_value == nil or payload_value == json.null then
+    return false
+  end
+
+  if type(payload_value) == "number" then
+    local configured_number = tonumber(configured_value)
+    return configured_number ~= nil and payload_value == configured_number
+  end
+
+  if type(payload_value) == "boolean" then
+    if configured_value == "true" then
+      return payload_value == true
+    elseif configured_value == "false" then
+      return payload_value == false
+    end
+    return false
+  end
+
+  return payload_value == configured_value
+
+end
+
+
 local function table_contains_value (t, value)
 
   for idx, val in ipairs(t) do
-    if type(val) ~= "table" and tostring(val) == tostring(value) then
+    if values_equal(val, value) then
       return true
     end
   end
@@ -143,12 +179,12 @@ function plugin:access(config)
 
     -- Custom claims
     if claim_config.equals ~= nil then
-      if tostring(payload_claim_item) ~= tostring(claim_config.equals) then
+      if not values_equal(payload_claim_item, claim_config.equals) then
         return unauthorized_due_to_failed_claim(claim_config.path, "did not equal "..claim_config.equals)
       end
     end
     if claim_config.does_not_equal ~= nil then
-      if no_verified_claims or type(payload_claim_item) == "table" or tostring(payload_claim_item) == tostring(claim_config.does_not_equal) then
+      if no_verified_claims or type(payload_claim_item) == "table" or values_equal(payload_claim_item, claim_config.does_not_equal) then
         return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal.." or was an unexpected table/array shape or no verified token was available")
       end
     end
@@ -156,7 +192,7 @@ function plugin:access(config)
       local match = false
       local check_count = 0
       for ei, ev in ipairs(claim_config.equals_one_of) do
-        if tostring(payload_claim_item) == tostring(ev) then
+        if values_equal(payload_claim_item, ev) then
           match = true
         end
         check_count = check_count + 1
@@ -172,7 +208,7 @@ function plugin:access(config)
         match = true
       end
       for ei, ev in ipairs(claim_config.equals_none_of) do
-        if tostring(payload_claim_item) == tostring(ev) then
+        if values_equal(payload_claim_item, ev) then
           match = true
         end
         check_count = check_count + 1

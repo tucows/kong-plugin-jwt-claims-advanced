@@ -79,6 +79,19 @@ local function get_jwt_decoded()
 end
 
 
+-- Lua/LuaJIT has no integer subtype -- every number, including one decoded
+-- from a JSON integer literal, is an IEEE-754 double. Doubles represent
+-- every integer exactly only up to this magnitude; beyond it, distinct
+-- decimal integers can round to the identical double, so a numeric
+-- equals/contains comparison can match a claim value that isn't really
+-- the one configured. This can only happen when the issuer emits the
+-- claim as a JSON number -- a claim sent as a JSON string is compared
+-- as an exact string and never hits this branch. 2^53 itself is still
+-- exactly representable; 2^53+1 is the first integer that isn't, so the
+-- safe boundary is one below that (same convention as JavaScript's
+-- Number.MAX_SAFE_INTEGER).
+local MAX_SAFE_INTEGER = 2^53 - 1
+
 -- Compares a decoded JWT claim value against a configured comparison
 -- operand (always a string, per schema.lua) in a type-aware way, rather
 -- than via tostring() coercion. tostring() reformats Lua numbers (e.g. a
@@ -86,7 +99,7 @@ end
 -- so a forbidden value of "1.0" would silently fail to match -- letting
 -- does_not_equal/equals_none_of pass when they should reject. Comparing
 -- numerically on both sides is immune to that formatting mismatch.
-local function values_equal(payload_value, configured_value)
+local function values_equal(payload_value, configured_value, claim_path)
 
   if type(payload_value) == "table" then
     return false
@@ -98,7 +111,18 @@ local function values_equal(payload_value, configured_value)
 
   if type(payload_value) == "number" then
     local configured_number = tonumber(configured_value)
-    return configured_number ~= nil and payload_value == configured_number
+    if configured_number == nil then
+      return false
+    end
+    if math.abs(payload_value) > MAX_SAFE_INTEGER or math.abs(configured_number) > MAX_SAFE_INTEGER then
+      kong.log.warn(
+        "Claim '", claim_path, "': numeric comparison beyond safe integer precision ",
+        "(claim value ", payload_value, " vs configured ", configured_value, "). ",
+        "Distinct large integers can round to the same value and compare equal. ",
+        "If this claim is a large identifier, have your identity provider emit it as a JSON string instead."
+      )
+    end
+    return payload_value == configured_number
   end
 
   if type(payload_value) == "boolean" then
@@ -115,10 +139,10 @@ local function values_equal(payload_value, configured_value)
 end
 
 
-local function table_contains_value (t, value)
+local function table_contains_value (t, value, claim_path)
 
   for idx, val in ipairs(t) do
-    if values_equal(val, value) then
+    if values_equal(val, value, claim_path) then
       return true
     end
   end
@@ -179,12 +203,12 @@ function plugin:access(config)
 
     -- Custom claims
     if claim_config.equals ~= nil then
-      if not values_equal(payload_claim_item, claim_config.equals) then
+      if not values_equal(payload_claim_item, claim_config.equals, claim_config.path) then
         return unauthorized_due_to_failed_claim(claim_config.path, "did not equal "..claim_config.equals)
       end
     end
     if claim_config.does_not_equal ~= nil then
-      if no_verified_claims or type(payload_claim_item) == "table" or values_equal(payload_claim_item, claim_config.does_not_equal) then
+      if no_verified_claims or type(payload_claim_item) == "table" or values_equal(payload_claim_item, claim_config.does_not_equal, claim_config.path) then
         return unauthorized_due_to_failed_claim(claim_config.path, "was equal to "..claim_config.does_not_equal.." or was an unexpected table/array shape or no verified token was available")
       end
     end
@@ -192,7 +216,7 @@ function plugin:access(config)
       local match = false
       local check_count = 0
       for ei, ev in ipairs(claim_config.equals_one_of) do
-        if values_equal(payload_claim_item, ev) then
+        if values_equal(payload_claim_item, ev, claim_config.path) then
           match = true
         end
         check_count = check_count + 1
@@ -208,7 +232,7 @@ function plugin:access(config)
         match = true
       end
       for ei, ev in ipairs(claim_config.equals_none_of) do
-        if values_equal(payload_claim_item, ev) then
+        if values_equal(payload_claim_item, ev, claim_config.path) then
           match = true
         end
         check_count = check_count + 1
@@ -220,14 +244,14 @@ function plugin:access(config)
     if claim_config.contains ~= nil then
       if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
         return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
-      elseif not table_contains_value(payload_claim_item,claim_config.contains) then
+      elseif not table_contains_value(payload_claim_item,claim_config.contains,claim_config.path) then
         return unauthorized_due_to_failed_claim(claim_config.path, "does not contain "..claim_config.contains)
       end
     end
     if claim_config.does_not_contain ~= nil then
       if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
         return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
-      elseif table_contains_value(payload_claim_item,claim_config.does_not_contain) then
+      elseif table_contains_value(payload_claim_item,claim_config.does_not_contain,claim_config.path) then
         return unauthorized_due_to_failed_claim(claim_config.path, "contains "..claim_config.does_not_contain)
       end
     end
@@ -238,7 +262,7 @@ function plugin:access(config)
         local match = false
         local check_count = 0
         for ci, cv in ipairs(claim_config.contains_one_of) do
-          if table_contains_value(payload_claim_item,cv) then
+          if table_contains_value(payload_claim_item,cv,claim_config.path) then
             match = true
           end
           check_count = check_count + 1
@@ -255,7 +279,7 @@ function plugin:access(config)
         local match = false
         local check_count = 0
         for ci, cv in ipairs(claim_config.contains_none_of) do
-          if table_contains_value(payload_claim_item,cv) then
+          if table_contains_value(payload_claim_item,cv,claim_config.path) then
             match = true
           end
           check_count = check_count + 1

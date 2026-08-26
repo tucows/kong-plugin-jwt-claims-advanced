@@ -138,6 +138,10 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
 
 Values can be either true or false (false is the default), and only applies when `output_header` is also configured. When this option is enabled it will set the value of the HTTP header for this claim to an empty string if the claim doesn't exist or is holding a value of undefined or null. If not, then the claim is required: a missing or null claim causes processing to stop, and a 403/unauthorized is returned out, rather than the header ever being set.
 
+### A note on large numeric claims
+
+`equals`, `does_not_equal`, `equals_one_of`, `equals_none_of`, `contains`, `does_not_contain`, `contains_one_of`, and `contains_none_of` all compare numeric claim values as Lua numbers (IEEE-754 doubles), which only represent every integer exactly up to 2^53 - 1 (9007199254740991). If your identity provider emits a claim as a JSON *number* larger than that (e.g. a 64-bit snowflake-style identifier), distinct identifiers can round to the same value and compare as equal. This only affects claims sent as JSON numbers -- a claim sent as a JSON *string* is always compared exactly, with no precision loss. If a claim carries a large numeric identifier, prefer having your identity provider emit it as a string. The plugin logs a warning (`kong.log.warn`) whenever a comparison crosses this boundary, so this condition is visible rather than silent.
+
 ### equals
 
 Checks the string/number value at the location specified by path to make sure it equals the value given in this configuration.  If it does not, then processing stops, and a 403/unauthorized is returned out.

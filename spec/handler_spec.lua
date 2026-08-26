@@ -42,6 +42,7 @@ local function reset_recorder()
   recorded = {
     exit_calls = {},
     headers_set = {},
+    warnings = {},
   }
 end
 
@@ -64,6 +65,9 @@ _G.kong = {
   },
   log = {
     err = function(...) end,
+    warn = function(...)
+      table.insert(recorded.warnings, table.concat({...}, ""))
+    end,
   },
 }
 
@@ -939,6 +943,64 @@ describe("jwt-claims-advanced handler", function()
       }))
 
       assert_rejected("role")
+    end)
+
+  end)
+
+  -- Lua/LuaJIT numbers are always IEEE-754 doubles, exact only up to 2^53.
+  -- Beyond that, distinct decimal integers can round to the same double,
+  -- so a numeric comparison can match a value that isn't really the one
+  -- configured -- this can only happen when the issuer sends the claim as
+  -- a JSON number; a JSON string claim is compared exactly and never hits
+  -- this code path. There's no fix for the collision itself (the precision
+  -- is already lost by the time cjson hands us a Lua number), so this only
+  -- covers the warning meant to surface the condition to operators.
+  describe("numeric comparisons beyond safe integer precision (2^53) log a warning", function()
+
+    it("does not warn for an ordinary small numeric comparison", function()
+      set_jwt_claims({ org_id = 42 })
+
+      plugin:access(make_config({
+        make_claim({ path = "org_id", equals = "42" }),
+      }))
+
+      assert_allowed()
+      assert.are.equal(0, #recorded.warnings)
+    end)
+
+    it("warns when a claim value beyond 2^53 is compared, and documents that distinct large integers can still match", function()
+      set_verified_token_raw('{"org_id": 9007199254740993}')
+
+      plugin:access(make_config({
+        make_claim({ path = "org_id", equals = "9007199254740992" }),
+      }))
+
+      -- Both values round to the same double, so the match "succeeds" --
+      -- the point of this test is the warning, not the match itself.
+      assert_allowed()
+      assert.are.equal(1, #recorded.warnings)
+    end)
+
+    it("warns for a does_not_equal deny rule too, since the collision risk is the same", function()
+      set_verified_token_raw('{"org_id": 9007199254740993}')
+
+      plugin:access(make_config({
+        make_claim({ path = "org_id", does_not_equal = "1" }),
+      }))
+
+      assert_allowed()
+      assert.are.equal(1, #recorded.warnings)
+    end)
+
+    it("does not warn when the large identifier is sent as a JSON string instead of a number", function()
+      set_jwt_claims({ org_id = "9007199254740993" })
+
+      plugin:access(make_config({
+        make_claim({ path = "org_id", equals = "9007199254740993" }),
+      }))
+
+      assert_allowed()
+      assert.are.equal(0, #recorded.warnings)
     end)
 
   end)

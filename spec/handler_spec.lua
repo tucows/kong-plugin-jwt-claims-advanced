@@ -858,6 +858,61 @@ describe("jwt-claims-advanced handler", function()
 
   end)
 
+  -- Regression coverage for a nested-wrapping bypass (security review
+  -- finding): table_contains_value() skips any array element that is
+  -- itself a table, because values_equal() always treats a table as "not
+  -- equal". A banned value hidden one array level deeper (e.g.
+  -- ["user-grp", ["banned-grp"]]) still passes is_json_array() and was
+  -- therefore silently missed by does_not_contain/contains_none_of -- the
+  -- banned membership was still present in the claim, just one level
+  -- deeper than table_contains_value looks. Unlike the existing "unrelated
+  -- nested array element" coverage above, the banned value here is NOT
+  -- also present as a top-level scalar, so this actually exercises the
+  -- gap rather than rejecting for an unrelated reason.
+  describe("a nested array element cannot be used to hide a banned value from deny-family contains checks", function()
+
+    it("does_not_contain rejects when the only occurrence of the banned value is nested one array level deeper", function()
+      set_jwt_claims({ groups = { "user-grp", { "banned-grp" } } })
+
+      plugin:access(make_config({
+        make_claim({ path = "groups", does_not_contain = "banned-grp" }),
+      }))
+
+      assert_rejected("groups")
+    end)
+
+    it("contains_none_of rejects when the only occurrence of the banned value is nested one array level deeper", function()
+      set_jwt_claims({ groups = { "user-grp", { "banned-grp" } } })
+
+      plugin:access(make_config({
+        make_claim({ path = "groups", contains_none_of = { "banned-grp" } }),
+      }))
+
+      assert_rejected("groups")
+    end)
+
+    it("does_not_contain still allows a proper array with no nested elements and no banned value", function()
+      set_jwt_claims({ groups = { "user-grp", "sales-grp" } })
+
+      plugin:access(make_config({
+        make_claim({ path = "groups", does_not_contain = "banned-grp" }),
+      }))
+
+      assert_allowed()
+    end)
+
+    it("contains_none_of still allows a proper array with no nested elements and no banned value", function()
+      set_jwt_claims({ groups = { "user-grp", "sales-grp" } })
+
+      plugin:access(make_config({
+        make_claim({ path = "groups", contains_none_of = { "banned-grp" } }),
+      }))
+
+      assert_allowed()
+    end)
+
+  end)
+
   -- Regression coverage for a tostring()-coercion bypass: JSON 1.0 decodes
   -- to Lua number 1, and tostring(1) is "1", not "1.0". A comparator that
   -- stringifies the JWT-side value before comparing would therefore let

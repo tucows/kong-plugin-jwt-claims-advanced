@@ -150,6 +150,23 @@ local function table_contains_value (t, value, claim_path)
   return false
 end
 
+-- A table nested inside a claim's array can never be safely compared by
+-- values_equal() (which always treats a table element as "not equal" and
+-- skips it) -- for a deny-list rule, silently skipping it would let a
+-- banned value hide one level deeper than table_contains_value looks. This
+-- mirrors the fail-closed guard already applied to table-shaped scalar
+-- claims for does_not_equal/equals_none_of.
+local function table_contains_nonscalar_element(t)
+
+  for idx, val in ipairs(t) do
+    if type(val) == "table" then
+      return true
+    end
+  end
+
+  return false
+end
+
 -- A JSON array decodes to a Lua table whose keys are exactly 1..#t.
 -- A JSON object (e.g. {"0": "x"}) does not satisfy this, even though
 -- both are Lua tables -- the contains-family operators only make sense
@@ -251,8 +268,8 @@ function plugin:access(config)
     if claim_config.does_not_contain ~= nil then
       if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
         return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
-      elseif table_contains_value(payload_claim_item,claim_config.does_not_contain,claim_config.path) then
-        return unauthorized_due_to_failed_claim(claim_config.path, "contains "..claim_config.does_not_contain)
+      elseif table_contains_nonscalar_element(payload_claim_item) or table_contains_value(payload_claim_item,claim_config.does_not_contain,claim_config.path) then
+        return unauthorized_due_to_failed_claim(claim_config.path, "contains "..claim_config.does_not_contain.." or an unexpected nested element")
       end
     end
     if #claim_config.contains_one_of ~= 0 then
@@ -276,7 +293,7 @@ function plugin:access(config)
       if type(payload_claim_item) ~= "table" or not is_json_array(payload_claim_item) then
         return unauthorized_due_to_failed_claim(claim_config.path, "not an array")
       else
-        local match = false
+        local match = table_contains_nonscalar_element(payload_claim_item)
         local check_count = 0
         for ci, cv in ipairs(claim_config.contains_none_of) do
           if table_contains_value(payload_claim_item,cv,claim_config.path) then
@@ -285,7 +302,7 @@ function plugin:access(config)
           check_count = check_count + 1
         end
         if match and check_count > 0 then
-          return unauthorized_due_to_failed_claim(claim_config.path, "contains one of "..table.concat(claim_config.contains_none_of, "; "))
+          return unauthorized_due_to_failed_claim(claim_config.path, "contains one of "..table.concat(claim_config.contains_none_of, "; ").." or an unexpected nested element")
         end
       end
     end

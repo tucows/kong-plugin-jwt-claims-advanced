@@ -44,7 +44,11 @@ Consider the following JWT data from a decoded token...
   },
   // NOTE: The official kong JWT plugin enforces the rule that the issuer MUST match what is configured under the jwt_secrets.key config.
   "iss": "eddie-was-here",
-  // NOTE: The official kong JWT plugin automatically checks the expiration
+  // NOTE: The official kong JWT plugin does NOT check the expiration by
+  // default. Its claims_to_verify config has no default value, so unless
+  // you explicitly set it to include "exp" (see the sample configuration
+  // below), an expired token still passes signature verification and is
+  // treated as authenticated.
   "exp": 100353266160
 }
 
@@ -70,6 +74,12 @@ plugins:
 # jwt-claims-advanced is NOT a replacement for the kong JWT plugin...
 - name: jwt
   service: service1
+  config:
+    # claims_to_verify has NO default in the official jwt plugin -- leaving
+    # it unset means expiration (and nbf) are never enforced, and this
+    # plugin has no independent check of its own. Set it explicitly.
+    claims_to_verify:
+    - exp
 - name: jwt-claims-advanced
   service: service1
   config:

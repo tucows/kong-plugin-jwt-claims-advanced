@@ -144,6 +144,8 @@ Any node/element of the JWT can be output in the HTTP headers to be sent to your
 
 ```
 
+**Your upstream service should treat these `X-JWT-*` headers as the sole source of truth for the claims this plugin checks, rather than also independently re-parsing the raw JWT (still present in the forwarded `Authorization` header -- Kong's `jwt` plugin does not strip it) for the same authorization decisions.** JSON allows more than one defensible reading of the same signed bytes (e.g. duplicate keys, or a flat key that happens to share a name with a nested path) -- this plugin's claim checks run against one specific parse, and a value it denies as unsafe could still be present in the raw token under a different parse. If your upstream re-parses the raw JWT itself instead of trusting the headers this plugin already extracted, that divergence can defeat a deny rule this plugin enforced.
+
 ### allow_undefined (optional)
 
 Values can be either true or false (false is the default), and only applies when `output_header` is also configured. When this option is enabled it will set the value of the HTTP header for this claim to an empty string if the claim doesn't exist or is holding a value of undefined or null. If not, then the claim is required: a missing or null claim causes processing to stop, and a 403/unauthorized is returned out, rather than the header ever being set.
